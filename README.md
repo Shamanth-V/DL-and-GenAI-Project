@@ -41,13 +41,27 @@ Per course requirements, this repo follows a strict milestone-branch workflow:
 
 - **`main`** always contains the latest working notebook, final report, and README — the most stable, up-to-date snapshot of the project.
 ```
-project-name/
-├── notebooks/
-│   └── smart_mcq_solver.ipynb        # full pipeline, milestones 1–5
-├── reports/
-│   └── final-report.pdf
+DL-and-GenAI-Project/
+├── README.md
 ├── requirements.txt
-└── README.md
+├── .gitignore
+├── data/
+│   ├── train.csv
+│   ├── test.csv
+│   └── sample_submission.csv
+├── Milestones/
+│   ├── 01_milestone1_eda.ipynb
+│   ├── 02_milestone2_features_and_lightgbm.ipynb
+│   ├── 03_milestone3_mlp.ipynb
+│   ├── 04_milestone4_roberta.ipynb
+│   └── 05_milestone5_ensemble.ipynb
+├── Final notebook/
+│   └── smart_mcq_solver_final.ipynb
+├── other notebooks/
+│   └── (all experimental notebooks)
+├── report/
+│   └── 23f2004250_DG_T22026.md
+└── submissions/
 ```
 
 ---
