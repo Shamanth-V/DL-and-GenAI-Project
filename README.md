@@ -1,135 +1,189 @@
-# Smart MCQ Solver : DL & GenAI Course Project
+# 🎯 Smart MCQ Solver Challenge
 
-**Author:** Shamanth V (23f2004250)
-**Course:** Deep Learning and Generative AI : Diploma Level, BS in Data Science and Applications
-**Competition:** Smart MCQ Solver Challenge (Kaggle)
+### Deep Learning & Generative AI Project · Diploma in BS Data Science and Applications
 
----
-
-## What this project is about
-
-This repo holds all my work for the DL & GenAI course project. The task itself is
-pretty straightforward to state and a lot harder to actually do well: given a
-question (`prompt`) and five answer options (`A`:`E`), predict the top 3 most
-likely correct answers, ranked by confidence. The competition is scored using
-**MAP@3** (Mean Average Precision @ 3), so getting the right answer into position
-1 is worth more than getting it into position 3, but getting it in there at all
-still counts for something.
-
-Dataset is roughly 2000 labeled training questions and 500 unlabeled test
-questions. Submission format is just `id,A B C` style rows : three letters,
-space separated, ranked.
-
-I've gone through this in stages rather than trying to jump straight to a
-fine-tuned transformer, mainly because the milestone structure of the course
-pushes you that way, but honestly it also just made debugging easier. Every
-stage is a separate branch (see below) so the progression is visible in the
-git history rather than just squashed into one giant commit at the end.
+**Author:** Shamanth V (`23f2004250`)\
+**Course:** Deep Learning and Generative AI : Diploma Level, BS in Data Science and Applications\
+**Competition:** [Smart MCQ Solver Challenge]([https://www.kaggle.com/](https://www.kaggle.com/competitions/smart-mcq-solver-challenge)) (Kaggle)  
+**Metric:** MAP@3
 
 ---
 
+## 📌 Problem Statement
 
-Branches follow `milestone-1`, `milestone-2`, ... `milestone-5`, each merged
-into `main` once that stage is stable. None of the milestone branches get
-deleted after merging, keeping them around is part of the evaluation
-requirement (progress has to be auditable, not just the final state).
+Each question in the dataset provides a **prompt** and **five candidate answers (A to E)**, exactly one of which is correct. The task is to predict the **top-3 most likely correct answers, ranked by confidence**, so that the true answer is retrieved as early as possible in the ranking.
 
----
+Performance is scored with **Mean Average Precision @ 3 (MAP@3)**, which rewards the correct label appearing higher in the predicted list, getting it in position 1 is worth more than position 3, but position 3 still counts for something.
 
-## How I approached each milestone
-
-**Milestone 1 : Baselines**
-Started with basic text cleaning and TF-IDF vectorization of the
-prompt + options. Computed cosine similarity between the prompt and each
-option as a first pass "does this even make sense" check, then wrote a MAP@3
-scorer from scratch to sanity-check against sklearn's ranking metrics. This
-gave me a real (if not great) baseline submission on Kaggle to compare
-everything else against.
-
-**Milestone 2 : Transformers enter the picture**
-Moved to `bert-base-uncased` for contextual embeddings and actually looked at
-the attention weights to see what the model was picking up on across
-question/option pairs,useful for building intuition, less useful for actual
-score improvement at this stage. Also tried `all-MiniLM-L6-v2` for
-sentence-level similarity (much faster, similar-ish performance), zero-shot
-classification with `facebook/bart-large-mnli`, and a generative approach
-using `google/flan-t5-base` just to see what a purely generative answer
-selection would look like.
-
-**Milestone 3 : RAG**
-Added a retrieval layer: FAISS for semantic search over a small context
-corpus, followed by cross-encoder reranking
-(`cross-encoder/ms-marco-MiniLM-L-6-v2`) to tighten up the retrieved context
-before it gets fed alongside the prompt and options. There's a
-`USE_RAG_CONTEXT` toggle in the code so the pipeline still runs (and doesn't
-silently break) if retrieval isn't wanted for a given run — this ended up
-being handy for A/B comparisons more than anything else.
-
-**Milestones 4 & 5 : Fine-tuning and ensembling**
-This is where most of the actual score improvement came from. Fine-tuned
-`microsoft/deberta-v3-base` using `AutoModelForMultipleChoice`, which forces a
-specific `(batch, num_choices, seq_len)` input shape and a custom data
-collator — that reshape isn't a style choice, it's just how the HF
-multiple-choice head expects its inputs. Ran 5-fold cross-validation and
-stacked out-of-fold predictions, and separately built a from-scratch
-TF-IDF + feedforward model to have a genuinely "not-pretrained" model in the
-mix (needed for the "3 unique models" requirement anyway, one from scratch,
-one pretrained, one of choice). Final predictions come from a small grid
-search over ensemble blend weights between the DeBERTa CV models and the
-from-scratch model.
+- **Training set:** 2,000 labeled questions (5 options each, 1 correct label, no missing values)
+- **Test set:** 500 unlabeled questions, same format
+- **Submission format:** `id, A B C` : three letters, space-separated, ranked by confidence
 
 ---
 
-## A couple of things worth flagging (mostly to future-me during viva prep)
+## 🧭 Project Rubric Coverage
 
-- FAISS is picky about dtype, everything going in needs to be `float32` and
-  contiguous, or it fails in ways that aren't obvious from the error message.
-- Mapping predicted labels back to letters (A–E) has to be done positionally,
-  not by matching option text, if two options happen to have identical text,
-  a text-based reverse lookup silently gives the wrong letter.
-- `transformers` renamed `tokenizer` → `processing_class` in `Trainer`
-  somewhere along the way, and `TrainingArguments` dropped `group_by_length`
-  in some versions. Both are wrapped in try/except so the notebook doesn't
-  break depending on which version Kaggle happens to have installed that day.
-- Training was done on Kaggle's free T4 GPUs — the P100 option exists too but
-  its older `sm_60` CUDA compute capability doesn't play nicely with newer
-  PyTorch builds, so T4 was the safer pick throughout.
+| # | Rubric Requirement | Model | Notebook Section |
+|---|---|---|---|
+| 1 | Classical / statistical baseline | **LightGBM** on TF-IDF similarity + engineered statistical features | Model 1 |
+| 2 | **From-scratch model** | **Feed-forward MLP** (pure PyTorch, no pretrained weights) on TF-IDF/SVD embeddings | Model 2 |
+| 3 | **Pretrained model**, fine-tuned | **RoBERTa-base**, fully fine-tuned end-to-end on `(prompt, option)` pairs | Model 3 |
+| 4 | **Model of choice / bonus** | **LoRA-tuned RoBERTa** — parameter-efficient fine-tuning via `peft` | Model 4 |
+| 5 | Ensembling milestone | Weighted probability average of the best 2–3 models by OOF MAP@3 | Ensemble |
+
+Every model is evaluated with **GroupKFold cross-validation**, grouped by question `id`, so all 5 options belonging to the same question always stay together on one side of the split, this prevents leakage between options of the same MCQ.
 
 ---
 
-## Running it
+## 🌿 Branching Strategy
 
-Everything is designed to run inside a Kaggle notebook (T4 GPU). Rough order:
+Per course requirements, this repo follows a strict milestone-branch workflow:
+
+- **`main`** always contains the latest working notebook, final report, and README — the most stable, up-to-date snapshot of the project.
+```
+project-name/
+├── notebooks/
+│   └── smart_mcq_solver.ipynb        # full pipeline, milestones 1–5
+├── reports/
+│   └── final-report.pdf
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## 🔎 Exploratory Data Analysis
+
+Two strong, exploitable signals shaped the entire pipeline:
+
+**1. Position bias.** Correct answers are not evenly distributed across A–E (uniform baseline would be 20% each):
+
+| Option | % Correct |
+|---|---|
+| B | 24.5% |
+| C | 22.95% |
+| A | 18.45% |
+| D | 17.9% |
+| E | 16.2% |
+
+This was encoded directly as a `position_prior` feature (learned only from train, applied to both splits, no leakage).
+
+**2. Length bias.** Prompts average 18 words; options average 26 words. Correct options run longer on average (28.66 words) than incorrect ones (25.68 words), and **the single longest option in a question is correct 34.95% of the time** , well above the 20% random baseline. This was the single strongest signal in the dataset and drove most of the feature engineering.
+
+No data augmentation was used, the existing signals were strong enough that augmentation risked diluting them.
+
+---
+
+## 🛠️ Approach
+
+The dataset was reshaped from **wide format** (one row per question, 5 answer columns) into **long format** (one row per `(question, option)` pair with a binary `correct / not correct` label). This turns the ranking problem into a binary classification problem that every model below solves in the same way, each producing a per-option probability that is then ranked into a top-3 submission.
+
+### 1️⃣ Feature Engineering
+
+Before modeling, each option is described three ways: on its own, relative to the prompt, and relative to the other 4 options in the same question.
+
+- **Length-based:** character/word counts, rank of this option's length among its siblings, z-score relative to the question's mean/std, "is longest" / "is shortest" flags
+- **Positional prior:** empirical probability that a given letter (A to E) is correct, learned from train only
+- **Prompt overlap:** word-level overlap between option text and the question prompt
+- **Inter-option overlap:** lexical similarity of an option to the other options in the same question
+- **Surface cues:** comma/digit counts, negation-word presence
+- **TF-IDF cosine similarity** between option text and prompt (vectorizer fit once, jointly across train + test, 30,000 features, unigrams + bigrams)
+- **SVD-compressed embeddings** (64-dim) of TF-IDF vectors, used as dense input for the MLP
+
+### 2️⃣ Model 1 : LightGBM (Classical Baseline)
+
+A gradient-boosted decision tree trained as a binary classifier on the engineered features above. Fast, interpretable, and used to sanity-check which engineered signals matter most via feature importance (length and TF-IDF similarity dominated, matching the EDA).
+
+- 31 leaves, learning rate 0.03, up to 2,000 estimators, early stopping after 100 rounds without improvement
+- Evaluated with GroupKFold cross-validation, OOF predictions used for both scoring and the ensemble
+
+### 3️⃣ Model 2 : From-Scratch MLP
+
+Satisfies the **mandatory from-scratch model** requirement: a plain feed-forward network in pure PyTorch (`Linear → ReLU → Dropout`, two hidden layers of 128 then 64 units), with **no pretrained weights**. Inputs are the SVD-compressed TF-IDF embeddings plus the same engineered features used by LightGBM, standardized before training.
+
+- Adam optimizer, learning rate 1e-3, up to 60 epochs
+- Early stopping based on **validation MAP@3** directly (not just loss), so the stopping criterion matches the competition metric
+
+### 4️⃣ Models 3 & 4 : RoBERTa Fine-Tune + LoRA (Bonus)
+
+One reusable function implements both, toggled by a `use_lora` flag. Both tokenize `(prompt, option)` as a sentence pair (RoBERTa's byte-level BPE tokenizer, truncated to 256 tokens) and train with `BCEWithLogitsLoss`, keeping them directly comparable to Models 1 & 2 via OOF MAP@3.
+
+- **Model 3 (pretrained fine-tune):** `roberta-base` with a sequence classification head, **all weights updated**. AdamW, learning rate 2e-5, 2 epochs, batch size 16.
+- **Model 4 (bonus / model of choice):** same backbone, but with **LoRA adapters** (`peft`, rank=16, alpha=32) attached to the attention query/value projections, only the low-rank adapters are trained, everything else frozen. Only ~0.94% of parameters trainable. Higher learning rate (1e-4), 3 epochs, since only a small fraction of the model is learning.
+
+### 5️⃣ Ensemble
+
+The best 2–3 models by OOF MAP@3 are combined via a **weighted probability average** (weights proportional to each model's own OOF score), then re-ranked per question for the final top-3 submission, this is what typically pushes the leaderboard score above any single model.
+
+---
+
+## 📊 Results
+
+All models evaluated with GroupKFold cross-validation (grouped by question `id`). Precision/recall/F1/accuracy computed at a 0.5 probability cutoff; MAP@3 is the competition metric.
+
+| Model | MAP@3 | Precision | Recall | F1 | Accuracy |
+|---|---|---|---|---|---|
+| LightGBM | **0.9928** | 0.9918 | 0.9710 | 0.9813 | 0.9926 |
+| MLP (from scratch) | 0.9896 | 0.9894 | 0.9330 | 0.9604 | 0.9846 |
+| RoBERTa (fine-tuned) | 0.7650 | 0.8487 | 0.1430 | 0.2448 | 0.8235 |
+| RoBERTa + LoRA | 0.6531 | 0.0000 | 0.0000 | 0.0000 | 0.8000 |
+| **Ensemble** (LightGBM + MLP + RoBERTa) | **0.9932** | — | — | — | — |
+
+**Key finding:** the feature-based models won clearly. LightGBM and the MLP both exploit the same length/overlap signals surfaced during EDA and scored near-perfectly, while the transformers had to rediscover correctness cues from raw text with only 2,000 training questions, too little data for that class of model to shine. LoRA, training under 1% of parameters, never crossed the 0.5 cutoff in the given epoch budget (hence zero precision/recall), though its raw ranking still earned partial MAP@3 credit. LightGBM was also far cheaper to train (seconds vs. several minutes per fold for the transformers), making it both the most accurate and the most efficient model here. The ensemble improved marginally over LightGBM alone (0.9932 vs 0.9928), showing the other models still contributed a small amount of independent signal.
+
+**Kaggle leaderboard:** 0.75394 (public) / 0.76094 (private), final rank **109th** on the private leaderboard (up 439 spots from the public rank).
+
+---
+
+## 🧪 Experiment Tracking
+
+All model runs (TF-IDF/LightGBM baseline, MLP, RoBERTa fine-tune, LoRA, ensemble) are logged to **Weights & Biases** under the project `23f2004250-t22026`, comparing accuracy and F1 across runs per the course requirement.
+
+---
+
+## ▶️ Running It
+
+Designed to run inside a Kaggle notebook (T4 GPU recommended)
 
 ```bash
 # inside the Kaggle notebook, milestone branch checked out
-!pip install -q transformers accelerate datasets sentence-transformers faiss-cpu peft
+!pip install -q transformers accelerate datasets peft lightgbm
 
-# clone / pull latest branch
+# clone / pull the latest branch
 !git clone https://github.com/Shamanth-V/DL-and-GenAI-Project.git
 %cd DL-and-GenAI-Project
-!git checkout milestone-4
+!git checkout milestone-5
 ```
 
-From there, the notebook cells handle training, cross-validation, and
-generating `submission.csv` in the `id,Prediction` format the competition
-expects.
+From there, running the notebook top to bottom:
 
-Local dependencies (for anything run outside Kaggle) are listed in
-`requirements.txt`.
+1. Loads and reshapes the data (wide → long)
+2. Builds engineered + TF-IDF/SVD features
+3. Trains Models 1 to 4, each reporting its own OOF MAP@3
+4. Scores and ranks all trained models, selects the top 2 to 3 for the ensemble
+5. Builds the final ensembled top-3 predictions and writes `submission.csv` in the `id,A B C` format the competition expects
 
----
+For a quick local/CPU-only test, set `run_transformers=False` in `main()` to only run the LightGBM + MLP baseline pair.
 
-## Experiment tracking
-
-All model runs are logged to Weights & Biases under the project
-`23f2004250-t22026`. At least three runs (TF-IDF baseline, DeBERTa fine-tune,
-ensemble) are compared there on accuracy and F1, per the course requirement.
+Local dependencies (for anything run outside Kaggle) are listed in `requirements.txt`.
 
 ---
 
-## Status
+## ⚠️ Notes for Future
 
-Milestones 1 through 5 are done and merged into `main`. Final report and
-Kaggle submission polishing are still in progress ahead of the last
-submission deadline.
+- **GroupKFold is non-negotiable here** : grouping by question `id` is the only thing stopping options from the same question leaking across train/validation.
+- **`peft` probes for an optional `torchao` backend on import**, which can conflict with the installed version, resolved with an uninstall/reinstall fix in the notebook rather than pinning a specific version.
+- **`transformers` renamed `tokenizer` → `processing_class` in `Trainer`** in newer versions, and `TrainingArguments` dropped `group_by_length` in some releases, both handled defensively so the notebook doesn't break depending on which version Kaggle has installed that day.
+- LoRA's low trainable-parameter count means it needs a *higher* learning rate and more epochs than full fine-tuning to converge in a comparable wall-clock budget, and even then it underperformed here.
+- The classical/from-scratch models beating the transformers is a direct consequence of dataset size (2,000 examples), with more data, the balance would likely tip back toward the transformer models.
+
+---
+
+## 🔭 Future Work
+
+- Give the transformer models more training time and a learning-rate warmup schedule
+- Try a pretrained model architecture better suited to this kind of pairwise classification task
+- Combine engineered features with transformer embeddings directly in one model, rather than only at the ensemble stage
+- Increase cross-validation folds for a more reliable score estimate, at the cost of extra training time
+
+---
